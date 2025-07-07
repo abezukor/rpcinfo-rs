@@ -1,8 +1,9 @@
 use bytes::Bytes;
-use onc_rpc::CallBody;
+use onc_rpc::{AcceptedStatus, CallBody};
 
+use super::deserialize_payload;
 use crate::{
-    error::DecodeError,
+    RpcBindResult,
     xdr_types::port_mapper::{CallArgs, Mapping},
 };
 
@@ -17,16 +18,16 @@ pub enum PortMapperRequest {
 }
 
 impl PortMapperRequest {
-    pub fn from_body<T: AsRef<[u8]>>(value: &CallBody<T, Bytes>) -> Result<Self, DecodeError> {
+    pub fn from_body<T: AsRef<[u8]>>(value: &CallBody<T, Bytes>) -> RpcBindResult<Self> {
         Ok(match value.procedure() {
             0 => Self::Null,
-            1 => Self::Set(facet_xdr::deserialize(value.payload())?),
-            2 => Self::Unset(facet_xdr::deserialize(value.payload())?),
-            3 => Self::GetPort(facet_xdr::deserialize(value.payload())?),
+            1 => Self::Set(deserialize_payload(value.payload())?),
+            2 => Self::Unset(deserialize_payload(value.payload())?),
+            3 => Self::GetPort(deserialize_payload(value.payload())?),
             4 => Self::Dump,
-            5 => Self::CallIt(facet_xdr::deserialize(value.payload())?),
-            invalid => {
-                return Err(DecodeError::UnknownProcedure(invalid));
+            5 => Self::CallIt(deserialize_payload(value.payload())?),
+            _ => {
+                return Err(AcceptedStatus::ProcedureUnavailable);
             }
         })
     }

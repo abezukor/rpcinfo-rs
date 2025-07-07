@@ -1,8 +1,9 @@
 use bytes::Bytes;
-use onc_rpc::CallBody;
+use onc_rpc::{AcceptedStatus, CallBody};
 
+use super::deserialize_payload;
 use crate::{
-    error::{self, DecodeError},
+    RpcBindResult,
     xdr_types::rpcbind::{NetBuf, RPCB, RmtCallArgs},
 };
 
@@ -22,13 +23,11 @@ pub enum RpcBindRequest {
 }
 
 impl RpcBindRequest {
-    pub fn from_body<T: AsRef<[u8]>>(
-        value: &CallBody<T, Bytes>,
-    ) -> Result<Self, error::DecodeError> {
+    pub fn from_body<T: AsRef<[u8]>>(value: &CallBody<T, Bytes>) -> RpcBindResult<Self> {
         Ok(match value.procedure() {
-            1 => Self::Set(facet_xdr::deserialize(value.payload())?),
-            2 => Self::Unset(facet_xdr::deserialize(value.payload())?),
-            3 => Self::GetAddr(facet_xdr::deserialize(value.payload())?),
+            1 => Self::Set(deserialize_payload(value.payload())?),
+            2 => Self::Unset(deserialize_payload(value.payload())?),
+            3 => Self::GetAddr(deserialize_payload(value.payload())?),
             4 => Self::Dump,
             /*
             //RPCBPROC_BCAST
@@ -40,8 +39,8 @@ impl RpcBindRequest {
             11 => Self::GetAddrList(RPCB::try_from(payload)?),
             */
             12 => Self::GetStat,
-            val => {
-                return Err(DecodeError::UnknownProcedure(val));
+            _ => {
+                return Err(AcceptedStatus::ProcedureUnavailable);
             }
         })
     }

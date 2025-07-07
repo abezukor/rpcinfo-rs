@@ -1,13 +1,14 @@
 use bytes::Bytes;
-use onc_rpc::CallBody;
-
-use crate::error::DecodeError;
+use facet::Facet;
+use onc_rpc::{AcceptedStatus, CallBody};
 
 mod port_mapper;
 mod rpcbind;
 
 pub use port_mapper::PortMapperRequest;
 pub use rpcbind::RpcBindRequest;
+
+use crate::RpcBindResult;
 
 #[derive(Debug)]
 pub enum RpcRequest {
@@ -18,12 +19,16 @@ pub enum RpcRequest {
 }
 
 impl RpcRequest {
-    pub fn from_body<T: AsRef<[u8]>>(value: &CallBody<T, Bytes>) -> Result<Self, DecodeError> {
+    pub fn from_body<T: AsRef<[u8]>>(value: &CallBody<T, Bytes>) -> RpcBindResult<Self> {
         Ok(match value.program_version() {
             2 => Self::V2(PortMapperRequest::from_body(value)?),
             3 => Self::V3(RpcBindRequest::from_body(value)?),
             4 => Self::V4(RpcBindRequest::from_body(value)?),
-            invalid => return Err(DecodeError::UnknownProgramVersion(invalid)),
+            _ => return Err(AcceptedStatus::ProgramMismatch { low: 2, high: 4 }),
         })
     }
+}
+
+fn deserialize_payload<'f, T: Facet<'f>, P: AsRef<[u8]>>(payload: P) -> RpcBindResult<T> {
+    facet_xdr::deserialize(payload.as_ref()).map_err(|_| AcceptedStatus::GarbageArgs)
 }

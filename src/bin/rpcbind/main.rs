@@ -107,11 +107,16 @@ pub fn handle_client(mut stream: impl Read + Write, state: &mut State) -> Result
     println!("Request {rpc_request:?}");
 
     let return_value = process_request(&rpc_request, state);
+    let accepted_status = match return_value {
+        Ok(val) => AcceptedStatus::Success(val),
+        Err(rs) => rs,
+    };
+
     let reply = RpcMessage::new(
         xid,
         MessageType::Reply(ReplyBody::Accepted(AcceptedReply::new(
             auth_flavor.clone(),
-            AcceptedStatus::Success(return_value),
+            accepted_status,
         ))),
     );
     //reply.serialise_into(stream).unwrap();
