@@ -7,25 +7,28 @@ use facet::Facet;
 use onc_rpc::AcceptedStatus;
 use rpcbind_rs::{RpcBindResult, request::RpcRequest};
 
-use crate::state::{ProgramDescription, ProgramKey, State};
+use crate::{
+    RPCResult, STATE,
+    error::AcceptedStatusError,
+    state::{ProgramDescription, ProgramKey},
+};
 
 mod portmapper;
 mod rpcbind;
 
-type RequestResult = Result<Vec<u8>, AcceptedStatus<Vec<u8>>>;
+type RequestResult = RPCResult<Vec<u8>>;
 
-pub fn process_request(request: &RpcRequest, state: &mut State) -> RequestResult {
+pub fn process_request(request: &RpcRequest) -> RequestResult {
     match request {
-        RpcRequest::V2(port_mapper_request) => {
-            portmapper::process_request(port_mapper_request, state)
-        }
+        RpcRequest::V2(port_mapper_request) => portmapper::process_request(port_mapper_request),
         RpcRequest::V3(rpc_bind_request) | RpcRequest::V4(rpc_bind_request) => {
-            rpcbind::process_request(rpc_bind_request, state)
+            rpcbind::process_request(rpc_bind_request)
         }
     }
 }
 
-fn set(state: &mut State, key: ProgramKey, val: ProgramDescription) -> RequestResult {
+fn set(key: ProgramKey, val: ProgramDescription) -> RequestResult {
+    let mut state = STATE.write();
     let entry = state.entry(key);
     let result = match entry {
         Entry::Occupied(_) => false,
@@ -41,7 +44,7 @@ fn decode_universal_address(universal_address: &str) -> RpcBindResult<SocketAddr
     // See https://datatracker.ietf.org/doc/html/rfc5665#autoid-13
     #[inline]
     fn take_byte<'a, 'b>(iter: &'a mut impl Iterator<Item = &'b str>) -> RpcBindResult<u8> {
-        let byte_str = iter.next().ok_or_else(|| AcceptedStatus::GarbageArgs)?;
+        let byte_str = iter.next().ok_or(AcceptedStatus::GarbageArgs)?;
         byte_str
             .parse::<u8>()
             .map_err(|_| AcceptedStatus::GarbageArgs)
@@ -65,7 +68,7 @@ fn decode_universal_address(universal_address: &str) -> RpcBindResult<SocketAddr
 
 #[inline]
 fn serialize_result<'f, Res: Facet<'f>>(res: &'f Res) -> RequestResult {
-    facet_xdr::to_vec(res).map_err(|_| AcceptedStatus::SystemError)
+    Ok(facet_xdr::to_vec(res).map_err(|_| AcceptedStatusError::SystemError)?)
 }
 
 #[cfg(test)]

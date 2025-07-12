@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use onc_rpc::{AcceptedStatus, CallBody};
 
 use super::deserialize_payload;
@@ -18,7 +17,7 @@ pub enum PortMapperRequest {
 }
 
 impl PortMapperRequest {
-    pub fn from_body<T: AsRef<[u8]>>(value: &CallBody<T, Bytes>) -> RpcBindResult<Self> {
+    pub fn from_body(value: &CallBody<impl AsRef<[u8]>, impl AsRef<[u8]>>) -> RpcBindResult<Self> {
         Ok(match value.procedure() {
             0 => Self::Null,
             1 => Self::Set(deserialize_payload(value.payload())?),

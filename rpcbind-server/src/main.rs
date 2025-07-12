@@ -1,20 +1,28 @@
 use std::{
-    io::{Read, Write},
-    net::{Ipv4Addr, SocketAddrV4, TcpListener},
+    net::{Ipv4Addr, SocketAddrV4},
+    sync::LazyLock,
 };
 
 use anyhow::{Result, anyhow, bail};
 use bytes::BytesMut;
 use onc_rpc::{
-    AcceptedReply, AcceptedStatus, Error as RPCError, MessageType, ReplyBody, RpcMessage,
+    AcceptedReply, AcceptedStatus, CallBody, Error as RPCError, MessageType, ReplyBody, RpcMessage,
+    auth::AuthFlavor,
 };
+use parking_lot::RwLock;
 use rpcbind_rs::request::RpcRequest;
+use tokio::{
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    net::TcpListener,
+};
 
 use crate::{
+    error::RPCResult,
     process_request::process_request,
     state::{ProgramDescription, ProgramKey, State},
 };
 
+mod error;
 mod netconfig;
 mod process_request;
 mod state;
@@ -22,10 +30,7 @@ mod state;
 const RPCBIND_PORT: u16 = 111;
 const PROGRAM_ID: u32 = 100000;
 
-pub fn main() {
-    let listener =
-        TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, RPCBIND_PORT)).unwrap();
-
+pub static STATE: LazyLock<RwLock<State>> = LazyLock::new(|| {
     let addrs = nix::ifaddrs::getifaddrs()
         .unwrap()
         .filter_map(|addr| addr.address)
@@ -49,34 +54,38 @@ pub fn main() {
             );
         }
     }
+    RwLock::new(state)
+});
 
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
-                if let Err(e) = handle_client(stream, &mut state) {
-                    eprintln!("Error handling client {e:?}");
-                }
+#[tokio::main(flavor = "current_thread")]
+pub async fn main() {
+    let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, RPCBIND_PORT))
+        .await
+        .unwrap();
+
+    loop {
+        let (stream, _) = listener.accept().await.unwrap();
+        tokio::spawn(async move {
+            if let Err(e) = handle_client(stream).await {
+                eprintln!("Error handling client {e:?}");
             }
-            Err(e) => {
-                eprintln!("Failed to establish connection: {e}");
-            }
-        }
+        });
     }
 }
 
 const MSG_HEADER_LEN: usize = 4;
 
-pub fn handle_client(mut stream: impl Read + Write, state: &mut State) -> Result<()> {
+pub async fn handle_client(mut stream: impl AsyncRead + AsyncWrite + Unpin) -> Result<()> {
     println!("Got stream");
 
     let mut request_header = [0u8; MSG_HEADER_LEN];
     //read header
-    stream.read_exact(&mut request_header).unwrap();
+    stream.read_exact(&mut request_header).await?;
     let expected_len = get_length(&request_header)?;
     let mut message = BytesMut::from(request_header.as_slice());
     message.resize(expected_len, 0);
 
-    stream.read_exact(&mut message[MSG_HEADER_LEN..]).unwrap();
+    stream.read_exact(&mut message[MSG_HEADER_LEN..]).await?;
     let message = match RpcMessage::try_from(message.freeze()) {
         Ok(message) => message,
         Err(RPCError::IncompleteHeader) => {
@@ -102,28 +111,28 @@ pub fn handle_client(mut stream: impl Read + Write, state: &mut State) -> Result
     let rpc_request = message
         .call_body()
         .ok_or_else(|| anyhow!("Server got response packet"))?;
-    let auth_flavor = rpc_request.auth_verifier();
-    let rpc_request = RpcRequest::from_body(rpc_request).unwrap();
-    println!("Request {rpc_request:?}");
-
-    let return_value = process_request(&rpc_request, state);
-    let accepted_status = match return_value {
-        Ok(val) => AcceptedStatus::Success(val),
-        Err(rs) => rs,
+    let body = match handle_request(rpc_request) {
+        Ok(status) => ReplyBody::Accepted(AcceptedReply::new(
+            AuthFlavor::<Vec<u8>>::AuthNone(None),
+            status,
+        )),
+        Err(e) => e.into(),
     };
 
-    let reply = RpcMessage::new(
-        xid,
-        MessageType::Reply(ReplyBody::Accepted(AcceptedReply::new(
-            auth_flavor.clone(),
-            accepted_status,
-        ))),
-    );
+    let reply = RpcMessage::new(xid, MessageType::Reply(body));
     //reply.serialise_into(stream).unwrap();
-    let reply = reply.serialise().unwrap();
-    stream.write_all(&reply).unwrap();
+    let reply = reply.serialise()?;
+    stream.write_all(&reply).await?;
 
     Ok(())
+}
+
+fn handle_request(
+    body: &CallBody<impl AsRef<[u8]>, impl AsRef<[u8]>>,
+) -> RPCResult<AcceptedStatus<Vec<u8>>> {
+    let request = RpcRequest::from_body(body)?;
+    let return_value = process_request(&request)?;
+    Ok(AcceptedStatus::Success(return_value))
 }
 
 fn get_length(header_bytes: &[u8; MSG_HEADER_LEN]) -> Result<usize> {

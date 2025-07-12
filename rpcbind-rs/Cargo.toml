@@ -1,0 +1,11 @@
+[package]
+name = "rpcbind-rs"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+
+onc-rpc.workspace = true
+facet.workspace = true
+facet-xdr.workspace = true

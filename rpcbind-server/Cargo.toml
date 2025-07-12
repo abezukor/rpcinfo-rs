@@ -1,0 +1,19 @@
+[package]
+name = "rpcbind-server"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+bytes.workspace = true
+onc-rpc.workspace = true
+facet.workspace = true
+facet-xdr.workspace = true
+
+anyhow = "1.0.98"
+nix = { version = "0.30.1", features = ["net"], default-features = false }
+tokio = { version = "1.46", features = ["rt", "net", "macros", "io-util"] }
+parking_lot = "0.12.4"
+thiserror = "2.0.12"
+
+rpcbind-rs.workspace = true

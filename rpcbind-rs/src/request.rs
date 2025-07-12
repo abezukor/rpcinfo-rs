@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use facet::Facet;
 use onc_rpc::{AcceptedStatus, CallBody};
 
@@ -19,7 +18,7 @@ pub enum RpcRequest {
 }
 
 impl RpcRequest {
-    pub fn from_body<T: AsRef<[u8]>>(value: &CallBody<T, Bytes>) -> RpcBindResult<Self> {
+    pub fn from_body(value: &CallBody<impl AsRef<[u8]>, impl AsRef<[u8]>>) -> RpcBindResult<Self> {
         Ok(match value.program_version() {
             2 => Self::V2(PortMapperRequest::from_body(value)?),
             3 => Self::V3(RpcBindRequest::from_body(value)?),
